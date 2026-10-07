@@ -1,0 +1,177 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Óptica – Gestión</title><link rel="stylesheet" href="style.css"></head><body><div id="app">Cargando…</div>
+<script>
+// ---- Configuración de Supabase (usa la llave PUBLISHABLE, nunca la secret) ----
+const SB_URL='https://htcvluwukqlensyqzyxu.supabase.co';
+const SB_KEY='sb_publishable_agonyWbiy41JHkw0Ym0lzA_XMPdvICr';
+// -------------------------------------------------------------------------------
+const TABLAS=['usuarios','clientes','productos','ventas','ordenes','movimientos'];
+const ESTADOS=['Orden creada','Enviada al laboratorio','En producción','Recibida','Control de calidad','Lista para entrega','Entregada'];
+const PERM={administrador:['dashboard','clientes','productos','inventario','ventas','ordenes','usuarios'],optometra:['dashboard','clientes'],vendedor:['dashboard','clientes','ventas'],auxiliar:['dashboard','productos','inventario','ventas','ordenes'],usuario:['productos','inventario','comprar']};
+const ROL={administrador:'Administrador',optometra:'Optómetra',vendedor:'Vendedor',auxiliar:'Auxiliar',usuario:'Usuario'};
+const NAV={dashboard:'Dashboard',clientes:'Clientes',productos:'Productos',inventario:'Inventario',ventas:'Ventas',ordenes:'Órdenes',usuarios:'Usuarios',comprar:'Comprar'};
+const S={
+ clientes:{t:'Clientes',cols:['documento','nombre','telefono','correo','fecha_registro'],f:[['documento','Documento de identidad','text'],['nombre','Nombre completo','text'],['fecha_nac','Fecha de nacimiento','date'],['telefono','Teléfono','text'],['correo','Correo','email'],['direccion','Dirección','text'],['observaciones','Observaciones','textarea']]},
+ productos:{t:'Catálogo de productos',cols:['codigo','categoria','marca','modelo','proveedor','precio','stock'],f:[['codigo','Código','text'],['categoria','Categoría','select',['Montura','Lente','Accesorio']],['marca','Marca','text'],['modelo','Modelo','text'],['descripcion','Descripción','text'],['proveedor','Proveedor','text'],['precio','Precio','number'],['stock','Existencias','number']]},
+ usuarios:{t:'Usuarios y roles',cols:['nombre','correo','rol'],f:[['nombre','Nombre','text'],['correo','Correo','email'],['rol','Rol','select',Object.keys(PERM)],['clave','Contraseña','password']]}};
+const $=s=>document.querySelector(s);
+const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money=n=>'$'+Number(n||0).toLocaleString('es-CO',{maximumFractionDigits:0});
+const p2=n=>String(n).padStart(2,'0');
+const ahora=()=>{const d=new Date();return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`};
+const hoy=()=>ahora().slice(0,10);
+async function sha(s){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}
+let D={},D0={},U=JSON.parse(sessionStorage.getItem('u')||'null'),msg='';
+async function sb(met,ruta,body,prefer){
+  const hd={apikey:SB_KEY,'Content-Type':'application/json'};if(prefer)hd.Prefer=prefer;
+  const r=await fetch(SB_URL+'/rest/v1/'+ruta,{method:met,headers:hd,body:body?JSON.stringify(body):undefined});
+  const t=await r.text();if(!r.ok)throw new Error(r.status+' '+t);return t?JSON.parse(t):null}
+async function cargar(){for(const t of TABLAS)D[t]=await sb('GET',t+'?select=*&order=id');D0=JSON.parse(JSON.stringify(D))}
+async function save(){
+  for(const t of TABLAS){
+    if(JSON.stringify(D0[t])===JSON.stringify(D[t]))continue;
+    const ids=D[t].map(r=>r.id);
+    await sb('DELETE',t+'?id='+(ids.length?'not.in.('+ids.join(',')+')':'gt.0'));
+    if(D[t].length)await sb('POST',t,D[t].map(r=>{const o={...r};for(const k in o)if(o[k]==='')o[k]=null;return o}),'resolution=merge-duplicates,return=minimal');
+  }
+  D0=JSON.parse(JSON.stringify(D))}
+const nid=t=>Math.max(0,...D[t].map(r=>r.id))+1;
+const nom=(t,id,k='nombre')=>{const r=D[t].find(x=>x.id==id);return r?r[k]:'—'};
+function mov(pid,t,c,nota){D.movimientos.push({id:nid('movimientos'),fecha:ahora(),producto_id:pid,tipo:t,cantidad:c,nota,usuario:U.nombre})}
+async function sembrar(){
+  if(!D.usuarios.length||D.usuarios.some(u=>(u.clave||'').length!==64)){
+    const u=async(i,n,c,r,p)=>({id:i,nombre:n,correo:c,rol:r,clave:await sha(p)});
+    D.usuarios=[await u(1,'Administrador','admin@optica.com','administrador','admin123'),await u(2,'Optómetra','optometra@optica.com','optometra','opto123'),await u(3,'Vendedor','vendedor@optica.com','vendedor','vende123'),await u(4,'Auxiliar','auxiliar@optica.com','auxiliar','aux123')]}
+  if(!D.usuarios.some(u=>u.correo==='usuario@optica.com'))D.usuarios.push({id:nid('usuarios'),nombre:'Usuario',correo:'usuario@optica.com',rol:'usuario',clave:await sha('user123')});
+  const c=(i,d,n,f,t,e,di,o)=>({id:i,documento:d,nombre:n,fecha_nac:f,telefono:t,correo:e,direccion:di,observaciones:o,fecha_registro:hoy()});
+  if(!D.clientes.length)D.clientes=[c(1,'1020304050','María Fernanda Ruiz','1990-05-14','3001112233','maria@correo.com','Calle 10 # 5-20',''),c(2,'1098765432','Carlos Pérez','1985-11-02','3109998877','carlos@correo.com','Carrera 3 # 12-45','Usa lentes progresivos'),c(3,'52123456','Laura Gómez','2001-02-28','3205554433','laura@correo.com','Av. Principal 8-10','')];
+  const p=(i,c,ca,ma,mo,pr,prc,s)=>({id:i,codigo:c,categoria:ca,marca:ma,modelo:mo,descripcion:'',proveedor:pr,precio:prc,stock:s});
+  if(!D.productos.length)D.productos=[p(1,'MON-001','Montura','Ray-Ban','RB5154','Distribuidora Visión',320000,8),p(2,'MON-002','Montura','Oakley','OX8046','Distribuidora Visión',410000,2),p(3,'LEN-001','Lente','Essilor','Monofocal CR-39','Laboratorio Óptico SA',120000,20),p(4,'LEN-002','Lente','Essilor','Progresivo Varilux','Laboratorio Óptico SA',480000,6),p(5,'ACC-001','Accesorio','Genérico','Estuche rígido','Insumos Ópticos',15000,30),p(6,'ACC-002','Accesorio','Genérico','Líquido limpiador','Insumos Ópticos',12000,0)];
+  await save()}
+
+// ---------- Login ----------
+function vLogin(err='',ok=''){
+  document.body.className='login';
+  $('#app').innerHTML=`<form class="card" onsubmit="doLogin(event)"><h1>👓 Gestión de Óptica</h1>${err?`<div class="msg err">${h(err)}</div>`:''}${ok?`<div class="msg">${h(ok)}</div>`:''}
+  <label>Rol<select name="rol">${Object.keys(PERM).map(r=>`<option value="${r}">${ROL[r]}</option>`).join('')}</select></label>
+  <label>Correo<input type="email" name="correo" required></label><label>Contraseña<input type="password" name="clave" required></label><button>Iniciar sesión</button>
+  <p class="hint">Demo: admin@optica.com / admin123<br>vendedor@optica.com / vende123<br>auxiliar@optica.com / aux123<br>optometra@optica.com / opto123<br>usuario@optica.com / user123</p>
+  <p class="hint"><a href="#" onclick="vRegistro();return false">¿No tienes cuenta? Crear cuenta</a></p></form>`}
+function vRegistro(err=''){
+  document.body.className='login';
+  $('#app').innerHTML=`<form class="card" onsubmit="doRegistro(event)"><h1>Crear cuenta</h1>${err?`<div class="msg err">${h(err)}</div>`:''}
+  <label>Nombre completo<input name="nombre" required></label><label>Correo<input type="email" name="correo" required></label>
+  <label>Contraseña (mínimo 6 caracteres)<input type="password" name="clave" minlength="6" required></label><label>Repetir contraseña<input type="password" name="clave2" required></label>
+  <button>Crear cuenta</button><p class="hint">Las cuentas nuevas se crean con rol Usuario (solo consulta del catálogo). Un administrador puede cambiarlo en Usuarios.</p>
+  <p class="hint"><a href="#" onclick="vLogin();return false">← Volver al inicio de sesión</a></p></form>`}
+async function doRegistro(e){
+  e.preventDefault();const f=new FormData(e.target),correo=f.get('correo').trim().toLowerCase();
+  if(f.get('clave')!==f.get('clave2'))return vRegistro('Las contraseñas no coinciden.');
+  try{await cargar();await sembrar();
+    if(D.usuarios.some(x=>x.correo.toLowerCase()===correo))return vRegistro('Ya existe una cuenta con ese correo.');
+    D.usuarios.push({id:nid('usuarios'),nombre:f.get('nombre').trim(),correo,rol:'usuario',clave:await sha(f.get('clave'))});
+    await save();vLogin('','Cuenta creada. Inicia sesión eligiendo el rol Usuario.');
+  }catch(x){vRegistro('Error Supabase: '+x.message)}}
+async function doLogin(e){
+  e.preventDefault();const f=new FormData(e.target);
+  try{await cargar();await sembrar();
+    const hs=await sha(f.get('clave'));
+    const x=D.usuarios.find(x=>x.correo.toLowerCase()===f.get('correo').trim().toLowerCase()&&x.rol===f.get('rol')&&x.clave===hs);
+    if(!x)return vLogin('Correo, contraseña o rol incorrectos.');
+    U={id:x.id,nombre:x.nombre,rol:x.rol};sessionStorage.setItem('u',JSON.stringify(U));location.hash='#dashboard';render();
+  }catch(x){vLogin('Error Supabase: '+x.message)}}
+function salir(){sessionStorage.removeItem('u');U=null;location.hash='';render()}
+
+// ---------- Acciones ----------
+async function run(fn){let t;try{t=await fn()}catch(x){msg='⚠ '+x.message}if(t)history.replaceState(null,'',t);render()}
+function enviar(e,fn,a){e.preventDefault();const fd=new FormData(e.target);run(()=>fn(fd,a))}
+async function guardar(fd,m){
+  const r={};for(const f of S[m].f){const v=(fd.get(f[0])||'').trim();r[f[0]]=f[2]==='number'?(parseFloat(v)||0):v}
+  const i=D[m].findIndex(x=>x.id==fd.get('id'));
+  if(m==='usuarios')r.clave=r.clave?await sha(r.clave):(i>=0?D[m][i].clave:'');
+  if(i>=0)D[m][i]={...D[m][i],...r};else{r.id=nid(m);if(m==='clientes')r.fecha_registro=hoy();D[m].push(r)}
+  await save();msg='Registro guardado correctamente.';return '#'+m}
+function borrar(m,id){if(!confirm('¿Eliminar este registro?'))return;run(async()=>{
+  if(m==='usuarios'&&id==U.id){msg='⚠ No puedes eliminar tu propio usuario.';return}
+  D[m]=D[m].filter(x=>x.id!=id);await save();msg='Registro eliminado.'})}
+async function movimiento(fd){
+  const p=D.productos.find(x=>x.id==fd.get('producto_id')),c=parseInt(fd.get('cantidad')),t=fd.get('tipo');
+  if(!p||!(c>=0))throw new Error('Datos del movimiento no válidos.');
+  if(t==='Salida'&&c>p.stock)throw new Error('La salida supera las existencias.');
+  p.stock=t==='Entrada'?p.stock+c:t==='Salida'?p.stock-c:c;
+  mov(p.id,t,c,(fd.get('nota')||'').trim());await save();msg='Movimiento registrado.'}
+async function vender(fd){
+  const L=[];let tot=0;const ps=fd.getAll('p'),qs=fd.getAll('q');
+  for(let k=0;k<ps.length;k++){const pr=D.productos.find(x=>x.id==ps[k]),q=parseInt(qs[k])||0;if(!pr||q<1)continue;
+    if(pr.stock<q)throw new Error('Existencias insuficientes de '+pr.codigo);L.push({pid:pr.id,q,pu:pr.precio});tot+=q*pr.precio}
+  const serv=parseFloat(fd.get('servicios'))||0;tot+=serv;const cid=parseInt(fd.get('cliente_id'));
+  if(!D.clientes.find(c=>c.id==cid))throw new Error('Selecciona un cliente.');
+  if(!L.length)throw new Error('Agrega al menos un producto.');
+  const vid=nid('ventas');
+  L.forEach(l=>{D.productos.find(x=>x.id==l.pid).stock-=l.q;mov(l.pid,'Salida',l.q,'Venta #'+vid)});
+  D.ventas.push({id:vid,fecha:ahora(),cliente_id:cid,items:L,servicios:serv,total:tot,pago:fd.get('pago'),usuario:U.nombre});
+  if(fd.get('crear_orden'))D.ordenes.push({id:nid('ordenes'),venta_id:vid,cliente_id:cid,estado:ESTADOS[0],seg:[[ESTADOS[0],ahora(),U.nombre]]});
+  await save();msg='Venta #'+vid+' registrada por '+money(tot)+'.'}
+const ucorreo=()=>(D.usuarios.find(x=>x.id==U.id)||{}).correo||'';
+async function comprar(fd){
+  const pr=D.productos.find(x=>x.id==fd.get('producto_id')),q=parseInt(fd.get('cantidad'))||0;
+  if(!pr||q<1)throw new Error('Elige un producto y una cantidad válida.');
+  if(pr.stock<q)throw new Error('Solo quedan '+pr.stock+' unidades de '+pr.codigo+'.');
+  const cu=ucorreo();let cl=D.clientes.find(c=>(c.correo||'').toLowerCase()===cu.toLowerCase());
+  if(!cl){cl={id:nid('clientes'),documento:'',nombre:U.nombre,fecha_nac:'',telefono:'',correo:cu,direccion:'',observaciones:'',fecha_registro:hoy()};D.clientes.push(cl)}
+  const vid=nid('ventas'),tot=q*pr.precio;pr.stock-=q;mov(pr.id,'Salida',q,'Compra #'+vid);
+  D.ventas.push({id:vid,fecha:ahora(),cliente_id:cl.id,items:[{pid:pr.id,q,pu:pr.precio}],servicios:0,total:tot,pago:fd.get('pago'),usuario:U.nombre});
+  await save();msg='Compra #'+vid+' realizada por '+money(tot)+'.';return '#comprar'}
+function avanzar(id){run(async()=>{const o=D.ordenes.find(x=>x.id==id),k=ESTADOS.indexOf(o.estado);
+  if(k>=0&&k<ESTADOS.length-1){o.estado=ESTADOS[k+1];o.seg.push([o.estado,ahora(),U.nombre]);await save()}})}
+
+// ---------- Vistas ----------
+const prodOpts=()=>'<option value="">— Producto —</option>'+D.productos.map(p=>`<option value="${p.id}">${h(`${p.codigo} · ${p.marca} ${p.modelo} (${p.stock}) ${money(p.precio)}`)}</option>`).join('');
+function vCrud(m,p){
+  const ro=U.rol==='usuario',e=S[m],ed=p.get('edit')?D[m].find(x=>x.id==p.get('edit')):null,q=p.get('q')||'',lab={fecha_registro:'Registro'};e.f.forEach(f=>lab[f[0]]=f[1]);
+  const campos=e.f.map((f,k)=>{const[n,l,t,o]=f,v=t==='password'?'':(ed?.[n]??'');
+    const c=t==='textarea'?`<textarea name="${n}">${h(v)}</textarea>`:t==='select'?`<select name="${n}">${o.map(x=>`<option${x==v?' selected':''}>${h(x)}</option>`).join('')}</select>`
+      :`<input type="${t}" name="${n}" value="${h(v)}"${t==='number'?' min="0" step="any"':''}${((k<2&&t!=='password')||(t==='password'&&!ed))?' required':''}>`;
+    return `<label>${l}${c}</label>`}).join('');
+  const filas=D[m].filter(r=>!q||JSON.stringify(r).toLowerCase().includes(q.toLowerCase())).map(r=>`<tr>${e.cols.map(c=>{let v=r[c]??'';
+    if(c==='precio')v=money(v);return `<td>${c==='stock'?`<span class="b ${v<=0?'rojo':v<=3?'amar':'verde'}">${h(v)}</span>`:h(v)}</td>`}).join('')}
+    <td class="acc">${ro?(m==='productos'?`<a class="btn2" href="#comprar?p=${r.id}">Comprar</a>`:''):`<a class="btn2" href="#${m}?edit=${r.id}">Editar</a>`}${U.rol==='administrador'?`<button class="del" onclick="borrar('${m}',${r.id})">Eliminar</button>`:''}</td></tr>`).join('');
+  return `<h2>${e.t}</h2>${ro?'':`<form class="card grid" onsubmit="enviar(event,guardar,'${m}')"><input type="hidden" name="id" value="${ed?ed.id:''}">${campos}
+  <div><button>${ed?'Actualizar':'Guardar'}</button>${ed?` <a class="btn2" href="#${m}">Cancelar</a>`:''}</div></form>`}
+  <form class="search" onsubmit="event.preventDefault();location.hash='#${m}?q='+encodeURIComponent(this.q.value)"><input name="q" placeholder="Buscar…" value="${h(q)}"><button>Buscar</button></form>
+  <table><tr>${e.cols.map(c=>`<th>${lab[c]}</th>`).join('')}<th></th></tr>${filas}</table>`}
+function vDash(){
+  const bajo=D.productos.filter(p=>p.stock<=3).length,pend=D.ordenes.filter(o=>o.estado!=='Entregada').length;
+  const k=[['Clientes',D.clientes.length],['Ventas',D.ventas.length],['Total vendido',money(D.ventas.reduce((a,v)=>a+Number(v.total),0))],['Órdenes pendientes',pend],['Productos con bajo stock',bajo]];
+  return `<h2>Dashboard</h2><div class="cards">${k.map(c=>`<div class="card kpi"><span>${c[0]}</span><b>${c[1]}</b></div>`).join('')}</div>
+  <h3>Órdenes por estado</h3><table><tr><th>Estado</th><th>Cantidad</th></tr>${ESTADOS.map(e=>`<tr><td>${e}</td><td>${D.ordenes.filter(o=>o.estado===e).length}</td></tr>`).join('')}</table>`}
+function vInv(){
+  const ro=U.rol==='usuario';
+  return `<h2>Inventario</h2>${ro?'':`<form class="card grid" onsubmit="enviar(event,movimiento)"><label>Producto<select name="producto_id">${prodOpts()}</select></label>
+  <label>Tipo<select name="tipo"><option>Entrada</option><option>Salida</option><option>Ajuste</option></select></label>
+  <label>Cantidad (en Ajuste: nueva existencia)<input type="number" name="cantidad" min="0" required></label><label>Nota<input name="nota"></label><div><button>Registrar movimiento</button></div></form>`}
+  <table><tr><th>Código</th><th>Producto</th><th>Existencias</th><th>Estado</th></tr>${D.productos.map(p=>`<tr><td>${h(p.codigo)}</td><td>${h(p.marca+' '+p.modelo)}</td><td>${p.stock}</td><td><span class="b ${p.stock<=0?'rojo">Agotado':p.stock<=3?'amar">Bajo inventario':'verde">Disponible'}</span></td></tr>`).join('')}</table>
+  ${ro?'':`<h3>Últimos movimientos</h3><table><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Cant.</th><th>Nota</th><th>Usuario</th></tr>${[...D.movimientos].reverse().slice(0,15).map(x=>`<tr><td>${x.fecha}</td><td>${h(nom('productos',x.producto_id,'codigo'))}</td><td>${x.tipo}</td><td>${x.cantidad}</td><td>${h(x.nota)}</td><td>${h(x.usuario)}</td></tr>`).join('')}</table>`}`}
+function vVentas(){
+  const lin=[0,1,2].map(k=>`<label>Producto ${k+1}<select name="p">${prodOpts()}</select></label><label>Cantidad<input type="number" name="q" min="1" value="1"></label>`).join('');
+  return `<h2>Ventas</h2><form class="card grid" onsubmit="enviar(event,vender)"><label>Cliente<select name="cliente_id"><option value="">— Cliente —</option>${D.clientes.map(c=>`<option value="${c.id}">${h(c.nombre)}</option>`).join('')}</select></label>${lin}
+  <label>Servicios adicionales ($)<input type="number" name="servicios" min="0" value="0"></label><label>Forma de pago<select name="pago"><option>Efectivo</option><option>Tarjeta</option><option>Transferencia</option></select></label>
+  <label class="chk"><input type="checkbox" name="crear_orden" value="1" checked> Crear orden de lentes</label><div><button>Registrar venta</button></div></form>
+  <table><tr><th>#</th><th>Fecha</th><th>Cliente</th><th>Artículos</th><th>Pago</th><th>Total</th><th>Atendió</th></tr>${[...D.ventas].reverse().map(v=>`<tr><td>${v.id}</td><td>${v.fecha}</td><td>${h(nom('clientes',v.cliente_id))}</td><td>${v.items.reduce((a,i)=>a+i.q,0)}</td><td>${h(v.pago)}</td><td>${money(v.total)}</td><td>${h(v.usuario)}</td></tr>`).join('')}</table>`}
+function vComprar(p){
+  const sel=p.get('p')||'',cu=ucorreo().toLowerCase(),cl=D.clientes.find(c=>(c.correo||'').toLowerCase()===cu),mias=cl?D.ventas.filter(v=>v.cliente_id==cl.id):[];
+  const opts='<option value="">— Elige un producto —</option>'+D.productos.filter(x=>x.stock>0).map(x=>`<option value="${x.id}"${x.id==sel?' selected':''}>${h(`${x.codigo} · ${x.marca} ${x.modelo} (${x.stock} disp.) ${money(x.precio)}`)}</option>`).join('');
+  return `<h2>Comprar</h2><form class="card grid" onsubmit="enviar(event,comprar)"><label>Producto<select name="producto_id" required>${opts}</select></label>
+  <label>Cantidad<input type="number" name="cantidad" min="1" value="1" required></label><label>Forma de pago<select name="pago"><option>Efectivo</option><option>Tarjeta</option><option>Transferencia</option></select></label><div><button>Comprar</button></div></form>
+  <h3>Mis compras</h3><table><tr><th>#</th><th>Fecha</th><th>Artículos</th><th>Pago</th><th>Total</th></tr>${[...mias].reverse().map(v=>`<tr><td>${v.id}</td><td>${v.fecha}</td><td>${v.items.reduce((a,i)=>a+i.q,0)}</td><td>${h(v.pago)}</td><td>${money(v.total)}</td></tr>`).join('')}</table>`}
+function vOrd(){
+  return `<h2>Órdenes de lentes</h2><table><tr><th>#</th><th>Venta</th><th>Cliente</th><th>Estado</th><th>Seguimiento</th><th></th></tr>${[...D.ordenes].reverse().map(o=>`<tr><td>${o.id}</td><td>#${o.venta_id}</td><td>${h(nom('clientes',o.cliente_id))}</td><td><span class="b ${o.estado==='Entregada'?'verde':'azul'}">${o.estado}</span></td>
+  <td><details><summary>Ver</summary>${o.seg.map(s=>`<small>${h(s[1]+' · '+s[0]+' · '+s[2])}</small><br>`).join('')}</details></td><td>${o.estado!=='Entregada'?`<button onclick="avanzar(${o.id})">Avanzar →</button>`:''}</td></tr>`).join('')}</table>`}
+async function render(){
+  if(!U)return vLogin();
+  document.body.className='';
+  try{await cargar()}catch(x){$('#app').innerHTML='<pre>Error Supabase: '+h(x.message)+'</pre>';return}
+  const[hm,qs]=(location.hash||'#dashboard').slice(1).split('?');let m=hm;if(!PERM[U.rol].includes(m))m=PERM[U.rol][0];
+  const body=S[m]?vCrud(m,new URLSearchParams(qs||'')):({dashboard:vDash,inventario:vInv,ventas:vVentas,ordenes:vOrd,comprar:vComprar})[m](new URLSearchParams(qs||''));
+  $('#app').innerHTML=`<header><b>👓 Óptica</b><nav>${Object.keys(NAV).filter(k=>PERM[U.rol].includes(k)).map(k=>`<a href="#${k}" class="${k===m?'on':''}">${NAV[k]}</a>`).join('')}</nav><span>${h(U.nombre)} (${h(U.rol)}) · <a href="#" onclick="salir()">Salir</a></span></header><main>${msg?`<div class="msg">${h(msg)}</div>`:''}${body}</main>`;msg=''}
+window.onhashchange=render;render();
+</script></body></html>
